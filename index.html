@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0f1115">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Remote">
+<title>PC Remote</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --key: #232731; --key-hi: #343a48; --line: #2b303b;
+    --text: #e7e9ee; --muted: #8a90a0; --accent: #4f8cff; --accent-dim: #4f8cff33;
+    --ok: #3ecf8e; --warn: #f5b041; --bad: #ef5b5b;
+    --gap: 6px; --radius: 10px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; position: fixed; inset: 0;
+    background: var(--bg); color: var(--text); overscroll-behavior: none;
+    font: 15px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  #app {
+    position: fixed; left: 0; top: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column; gap: var(--gap);
+    padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+             max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  button {
+    font: inherit; color: var(--text); background: var(--key); border: 0; border-radius: var(--radius);
+    min-width: 0; padding: 0 4px; touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  button.down { background: var(--key-hi); }
+
+  header { display: flex; align-items: center; gap: 8px; height: 36px; flex: none; }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); flex: none; }
+  #dot.ok { background: var(--ok); } #dot.bad { background: var(--bad); }
+  #status { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .spacer { flex: 1; }
+  header button { width: 40px; height: 36px; font-size: 18px; background: transparent; }
+
+  #pad { flex: 1; min-height: 90px; display: flex; gap: var(--gap); }
+  #surface, #strip {
+    position: relative; border-radius: 16px; border: 1px solid var(--line);
+    background: radial-gradient(circle at 50% 40%, #1c2029, var(--panel));
+  }
+  #surface { flex: 1; overflow: hidden; }
+  #surface.drag { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  #hint {
+    position: absolute; inset: 0; display: grid; place-content: center; text-align: center;
+    color: var(--muted); font-size: 13px; line-height: 1.7; padding: 16px; pointer-events: none;
+    transition: opacity .4s;
+  }
+  #strip { width: 38px; flex: none; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
+  #strip::before { content: ""; position: absolute; top: 14px; bottom: 14px; width: 2px; border-radius: 1px;
+    background: repeating-linear-gradient(var(--line) 0 6px, transparent 6px 12px); }
+
+  .row { display: flex; gap: var(--gap); flex: none; }
+  .row > button { flex: 1; height: 44px; }
+  #mouse > button { height: 52px; font-size: 14px; color: var(--muted); }
+  #mouse > button[data-btn="l"], #mouse > button[data-btn="r"] { flex: 2; }
+  #hold.on { background: var(--accent); color: #fff; }
+
+  #mods > button { font-size: 14px; }
+  #mods > button[data-mod].on { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-dim); }
+  #mods > button[data-mod].lock { background: var(--accent); color: #fff; }
+
+  #tabs { display: flex; gap: 2px; flex: none; background: var(--panel); border-radius: var(--radius); padding: 3px; }
+  #tabs button { flex: 1; height: 30px; background: transparent; color: var(--muted); font-size: 13px; border-radius: 8px; }
+  #tabs button.on { background: var(--key); color: var(--text); }
+  #panel { flex: none; display: grid; gap: var(--gap); grid-auto-rows: 42px; }
+  #panel.collapsed { display: none; }
+  #panel button { font-size: 14px; }
+  #panel button.small { font-size: 12px; }
+  #panel button[data-hold] { background: linear-gradient(90deg, #5a2a2a 50%, var(--key) 50%) 100% 0 / 200% 100%; }
+  #panel button[data-hold].arming { background-position: 0 0; transition: background-position .6s linear; }
+
+  #typing textarea {
+    flex: 1; min-width: 0; height: 44px; resize: none; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--panel); color: var(--text); padding: 11px 12px; font: 16px/20px system-ui, sans-serif;
+    white-space: pre; overflow: hidden; user-select: text; -webkit-user-select: text; touch-action: manipulation;
+  }
+  #typing textarea:focus { outline: none; border-color: var(--accent); }
+  #typing > button { flex: none; width: 52px; font-size: 18px; }
+
+  /* Keyboard up: give the trackpad the room, the tabbed keys come back when it closes. */
+  body.typing #panel, body.typing #tabs { display: none; }
+
+  #settings {
+    position: fixed; inset: 0; background: #000a; display: flex; align-items: flex-end; justify-content: center;
+    z-index: 10;
+  }
+  #settings[hidden] { display: none; }
+  #settings .sheet {
+    width: 100%; max-width: 520px; background: var(--panel); border-radius: 18px 18px 0 0;
+    padding: 18px 18px max(18px, env(safe-area-inset-bottom)); display: grid; gap: 14px;
+    max-height: 90%; overflow: auto;
+  }
+  #settings h2 { margin: 0; font-size: 17px; display: flex; justify-content: space-between; align-items: center; }
+  #settings h2 button { height: 34px; padding: 0 14px; }
+  #settings label { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; font-size: 15px; }
+  #settings label output { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #settings input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+  #settings input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); }
+  #settings p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span id="dot"></span><span id="status">Connecting…</span>
+    <span class="spacer"></span>
+    <button id="btn-kb" title="Keyboard">⌨︎</button>
+    <button id="btn-fs" title="Full screen" hidden>⛶</button>
+    <button id="btn-set" title="Settings">⚙︎</button>
+  </header>
+
+  <div id="pad">
+    <div id="surface"><div id="hint">Drag to move · tap to click<br>Two-finger tap: right-click<br>Two-finger drag: scroll</div></div>
+    <div id="strip"></div>
+  </div>
+
+  <div class="row" id="mouse">
+    <button data-btn="l">Left</button>
+    <button data-btn="m">Mid</button>
+    <button data-btn="r">Right</button>
+    <button id="hold" title="Hold the left button down for dragging">Hold</button>
+  </div>
+
+  <div class="row" id="mods">
+    <button data-mod="ctrl">Ctrl</button>
+    <button data-mod="alt">Alt</button>
+    <button data-mod="shift">Shift</button>
+    <button data-mod="win">Win</button>
+    <button data-key="esc">Esc</button>
+    <button data-key="tab" data-rep>Tab</button>
+  </div>
+
+  <nav id="tabs">
+    <button data-tab="nav">Arrows</button>
+    <button data-tab="fn">F-keys</button>
+    <button data-tab="media">Media</button>
+    <button data-tab="sc">Shortcuts</button>
+  </nav>
+  <div id="panel"></div>
+
+  <div class="row" id="typing">
+    <textarea id="text" rows="1" wrap="off" placeholder="Tap here to type…" enterkeyhint="enter"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+    <button data-key="back" data-rep title="Backspace">⌫</button>
+    <button data-key="enter" title="Enter">⏎</button>
+  </div>
+</div>
+
+<div id="settings" hidden>
+  <div class="sheet">
+    <h2>Settings <button id="set-close">Done</button></h2>
+    <label>Pointer speed <output data-for="sens"></output><input type="range" data-set="sens" min="0.4" max="5" step="0.1"></label>
+    <label>Acceleration <output data-for="accel"></output><input type="range" data-set="accel" min="0" max="2.5" step="0.1"></label>
+    <label>Scroll speed <output data-for="scroll"></output><input type="range" data-set="scroll" min="0.5" max="10" step="0.5"></label>
+    <label>Natural scrolling (content follows finger) <input type="checkbox" data-set="natural"></label>
+    <label>Scroll momentum <input type="checkbox" data-set="momentum"></label>
+    <label>Tap to click <input type="checkbox" data-set="tapClick"></label>
+    <label>Vibrate on press (Android) <input type="checkbox" data-set="haptics"></label>
+    <label>Keep phone screen on <input type="checkbox" data-set="wake"></label>
+    <p>Modifiers: tap once to apply to the next key or click, double-tap to lock (held down until tapped again).
+      Lock Alt then tap Tab to walk the Alt+Tab switcher. Alt+F4 fires after a short hold.</p>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+
+// ---------------------------------------------------------------- settings
+const DEFAULTS = { sens: 1.6, accel: 0.5, scroll: 3, natural: true, momentum: true, tapClick: true, haptics: true, wake: true };
+const S = { ...DEFAULTS };
+try { Object.assign(S, JSON.parse(localStorage.getItem('remote-settings') || '{}')); } catch {}
+function saveSettings() { try { localStorage.setItem('remote-settings', JSON.stringify(S)); } catch {} }
+
+for (const el of $$('[data-set]')) {
+  const k = el.dataset.set, out = $(`output[data-for="${k}"]`);
+  const show = () => { if (out) out.textContent = (+S[k]).toFixed(1) + '×'; };
+  if (el.type === 'checkbox') el.checked = !!S[k]; else el.value = S[k];
+  show();
+  el.addEventListener('input', () => {
+    S[k] = el.type === 'checkbox' ? el.checked : +el.value;
+    show(); saveSettings();
+    if (k === 'wake') updateWakeLock();
+  });
+}
+$('#btn-set').addEventListener('click', () => { $('#settings').hidden = false; });
+$('#set-close').addEventListener('click', () => { $('#settings').hidden = true; });
+$('#settings').addEventListener('click', e => { if (e.target.id === 'settings') e.currentTarget.hidden = true; });
+
+const buzz = (ms = 8) => { if (S.haptics && navigator.vibrate) navigator.vibrate(ms); };
+
+// ---------------------------------------------------------------- connection
+let ws = null, retry = null, pingTimer = null, lastPong = 0, hostName = '', latency = null;
+const dot = $('#dot'), statusEl = $('#status');
+
+function setStatus(state, text) {
+  dot.className = state === 'ok' ? 'ok' : state === 'bad' ? 'bad' : '';
+  statusEl.textContent = text;
+}
+function showConnected() {
+  setStatus('ok', (hostName || 'Connected') + (latency != null ? ` · ${latency} ms` : ''));
+}
+function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+
+function connect() {
+  clearTimeout(retry);
+  if (document.hidden || (ws && ws.readyState <= 1)) return;
+  setStatus('wait', 'Connecting…');
+  const sock = ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  sock.onopen = () => {
+    lastPong = performance.now();
+    showConnected();
+    clearInterval(pingTimer);
+    pingTimer = setInterval(() => {
+      if (performance.now() - lastPong > 6000) { sock.close(); return; }  // stale link: force a reconnect
+      send({ t: 'ping', id: performance.now() });
+    }, 2000);
+    updateWakeLock();
+  };
+  sock.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.t === 'pong') { lastPong = performance.now(); latency = Math.round(lastPong - m.id); showConnected(); }
+    else if (m.t === 'hello') { hostName = m.host; showConnected(); }
+  };
+  sock.onclose = () => {
+    if (ws !== sock) return;
+    clearInterval(pingTimer);
+    resetHeld();  // the server releases everything when a connection drops
+    setStatus('bad', 'Disconnected — retrying…');
+    if (!document.hidden) retry = setTimeout(connect, 1000);
+  };
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    releaseAll();
+    if (ws) ws.close();
+  } else {
+    connect();
+  }
+});
+window.addEventListener('pagehide', releaseAll);
+
+let wakeLock = null;
+async function updateWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    if (S.wake && !document.hidden && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } else if (!S.wake && wakeLock) {
+      await wakeLock.release();
+    }
+  } catch {}
+}
+
+// ---------------------------------------------------------------- modifiers & keys
+const mods = { ctrl: 0, alt: 0, shift: 0, win: 0 };  // 0 off, 1 next-key only, 2 locked (held on the PC)
+const modTapAt = {};
+
+function paintMods() {
+  for (const b of $$('[data-mod]')) {
+    const s = mods[b.dataset.mod];
+    b.classList.toggle('on', s === 1);
+    b.classList.toggle('lock', s === 2);
+  }
+}
+function tapMod(name) {
+  const now = performance.now(), s = mods[name];
+  if (s === 0) mods[name] = 1;
+  else if (s === 1 && now - (modTapAt[name] || 0) < 350) { mods[name] = 2; send({ t: 'md', k: name }); }
+  else if (s === 1) mods[name] = 0;
+  else { mods[name] = 0; send({ t: 'mu', k: name }); }
+  modTapAt[name] = now;
+  paintMods();
+}
+// One-shot modifiers are used up by the next key, click or typed character.
+function takeMods() {
+  const out = [];
+  for (const k in mods) if (mods[k] === 1) { out.push(k); mods[k] = 0; }
+  if (out.length) paintMods();
+  return out;
+}
+function pressKey(k, extra = [], n = 1) {
+  const m = { t: 'k', k, mods: [...extra, ...takeMods()] };
+  if (n > 1) m.n = n;
+  send(m);
+}
+function typeText(s) {
+  if (!s) return;
+  const chars = Array.from(s);
+  if (Object.values(mods).includes(1)) { pressKey(chars.shift()); if (!chars.length) return; }
+  send({ t: 'txt', s: chars.join('') });
+}
+
+let holdOn = false;
+const holdBtn = $('#hold');
+function setHold(on) {
+  if (on === holdOn) return;
+  holdOn = on;
+  holdBtn.classList.toggle('on', on);
+  $('#surface').classList.toggle('drag', on);
+  send({ t: on ? 'bd' : 'bu', b: 'l' });
+}
+const heldButtons = new Set();
+function releaseAll() {
+  for (const b of heldButtons) send({ t: 'bu', b });
+  if (holdOn) send({ t: 'bu', b: 'l' });
+  for (const k in mods) if (mods[k] === 2) send({ t: 'mu', k });
+  resetHeld();
+}
+function resetHeld() {
+  heldButtons.clear();
+  holdOn = false; holdBtn.classList.remove('on'); $('#surface').classList.remove('drag');
+  for (const k in mods) mods[k] = 0;
+  paintMods();
+  for (const b of $$('button.down')) b.classList.remove('down');
+}
+
+// ---------------------------------------------------------------- key panels
+const PANELS = {
+  nav: { cols: 5, keys: [
+    ['PgUp', 'pgup', { rep: 1 }], ['Home', 'home'], ['↑', 'up', { rep: 1 }], ['End', 'end'], ['Del', 'del', { rep: 1 }],
+    ['PgDn', 'pgdn', { rep: 1 }], ['←', 'left', { rep: 1 }], ['↓', 'down', { rep: 1 }], ['→', 'right', { rep: 1 }], ['Space', 'space', { rep: 1 }],
+  ] },
+  fn: { cols: 6, keys: Array.from({ length: 12 }, (_, i) => [`F${i + 1}`, `f${i + 1}`]) },
+  media: { cols: 4, keys: [
+    ['Vol −', 'voldown', { rep: 1 }], ['Mute', 'mute'], ['Vol +', 'volup', { rep: 1 }], ['PrtSc', 'prtsc'],
+    ['⏮', 'prev'], ['⏯', 'play'], ['⏭', 'next'], ['Menu', 'menu'],
+  ] },
+  sc: { cols: 6, keys: [
+    ['Copy', 'c', { mods: ['ctrl'] }], ['Paste', 'v', { mods: ['ctrl'] }], ['Cut', 'x', { mods: ['ctrl'] }],
+    ['Undo', 'z', { mods: ['ctrl'], rep: 1 }], ['Redo', 'y', { mods: ['ctrl'], rep: 1 }], ['All', 'a', { mods: ['ctrl'] }],
+    ['Alt Tab', 'tab', { mods: ['alt'] }], ['Desktop', 'd', { mods: ['win'] }], ['Tasks', 'tab', { mods: ['win'] }],
+    ['Close tab', 'w', { mods: ['ctrl'] }], ['Reload', 'f5'], ['Alt F4', 'f4', { mods: ['alt'], hold: 1 }],
+  ] },
+};
+const panel = $('#panel'), tabs = $('#tabs');
+let tab = 'nav';
+try { tab = localStorage.getItem('remote-tab') || 'nav'; } catch {}
+let collapsed = false;
+
+function renderPanel() {
+  if (!PANELS[tab]) tab = 'nav';
+  const p = PANELS[tab];
+  panel.style.gridTemplateColumns = `repeat(${p.cols}, 1fr)`;
+  panel.replaceChildren(...p.keys.map(([label, k, o = {}]) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.dataset.key = k;
+    if (o.mods) b.dataset.mods = o.mods.join(',');
+    if (o.rep) b.dataset.rep = '';
+    if (o.hold) b.dataset.hold = '';
+    if (label.length > 6) b.className = 'small';
+    return b;
+  }));
+  for (const b of $$('button', tabs)) b.classList.toggle('on', b.dataset.tab === tab && !collapsed);
+  panel.classList.toggle('collapsed', collapsed);
+}
+renderPanel();
+
+// ---------------------------------------------------------------- buttons
+// Act on pointerdown (no 300ms click delay) and keep focus in the text box so the phone keyboard stays up.
+const app = $('#app');
+app.addEventListener('touchstart', e => {
+  if (!e.target.closest('header, textarea')) e.preventDefault();
+}, { passive: false });
+app.addEventListener('contextmenu', e => e.preventDefault());
+
+function bindPress(b, onDown, onUp) {
+  let active = false;
+  b.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (active) return;
+    active = true;
+    b.setPointerCapture(e.pointerId);
+    b.classList.add('down');
+    buzz();
+    onDown && onDown(e);
+  });
+  const end = e => {
+    if (!active) return;
+    active = false;
+    b.classList.remove('down');
+    onUp && onUp(e);
+  };
+  b.addEventListener('pointerup', end);
+  b.addEventListener('pointercancel', end);
+}
+
+// Key buttons are delegated so the panel can be re-rendered.
+let repeatTimer = null, holdTimer = null;
+function stopRepeat() { clearTimeout(repeatTimer); clearInterval(repeatTimer); repeatTimer = null; }
+app.addEventListener('pointerdown', e => {
+  const b = e.target.closest('button[data-key]');
+  if (!b) return;
+  e.preventDefault();
+  b.setPointerCapture(e.pointerId);
+  b.classList.add('down');
+  buzz();
+  const fire = () => {
+    pressKey(b.dataset.key, b.dataset.mods ? b.dataset.mods.split(',') : []);
+    if (b.dataset.key === 'enter' && b.closest('#typing')) clearText();
+  };
+  if ('hold' in b.dataset) {
+    b.classList.add('arming');
+    holdTimer = setTimeout(() => { b.classList.remove('arming'); fire(); buzz(30); }, 600);
+    return;
+  }
+  fire();
+  stopRepeat();
+  if ('rep' in b.dataset) repeatTimer = setTimeout(() => { repeatTimer = setInterval(fire, 45); }, 380);
+});
+function keyUp(e) {
+  const b = e.target.closest && e.target.closest('button[data-key]');
+  if (!b) return;
+  b.classList.remove('down', 'arming');
+  clearTimeout(holdTimer);
+  stopRepeat();
+}
+app.addEventListener('pointerup', keyUp);
+app.addEventListener('pointercancel', keyUp);
+
+for (const b of $$('[data-mod]')) bindPress(b, () => tapMod(b.dataset.mod));
+for (const b of $$('#mouse [data-btn]')) {
+  const btn = b.dataset.btn;
+  bindPress(b,
+    () => { if (holdOn) { setHold(false); return; } heldButtons.add(btn); send({ t: 'bd', b: btn }); },
+    () => { if (heldButtons.delete(btn)) send({ t: 'bu', b: btn }); });
+}
+bindPress(holdBtn, () => setHold(!holdOn));
+for (const b of $$('button', tabs)) bindPress(b, () => {
+  if (b.dataset.tab === tab) collapsed = !collapsed;
+  else { tab = b.dataset.tab; collapsed = false; try { localStorage.setItem('remote-tab', tab); } catch {} }
+  renderPanel();
+});
+
+// ---------------------------------------------------------------- trackpad
+const surface = $('#surface'), strip = $('#strip'), hint = $('#hint');
+const SLOP = 8, TAP_MS = 280;
+const acc = { mx: 0, my: 0, sx: 0, sy: 0 };
+const pts = new Map();
+let g = null;  // current gesture
+let raf = 0, glide = null;
+
+function schedule() { if (!raf) raf = requestAnimationFrame(flush); }
+function flush() {
+  raf = 0;
+  const mx = Math.trunc(acc.mx), my = Math.trunc(acc.my);
+  if (mx || my) { acc.mx -= mx; acc.my -= my; send({ t: 'm', x: mx, y: my }); }
+  const dir = S.natural ? 1 : -1;
+  const wy = Math.trunc(acc.sy * S.scroll * dir), wx = Math.trunc(-acc.sx * S.scroll * dir);
+  if (wy || wx) {
+    acc.sy -= wy / (S.scroll * dir);
+    acc.sx -= wx / (-S.scroll * dir);
+    send({ t: 's', x: wx, y: wy });
+  }
+}
+function gain(v) { return S.sens * (1 + S.accel * Math.min(Math.max(v - 0.15, 0), 2.5)); }
+
+function stopGlide() { if (glide) { cancelAnimationFrame(glide.id); glide = null; } }
+function startGlide(vx, vy) {
+  if (!S.momentum || Math.hypot(vx, vy) < 0.25) return;
+  let last = performance.now();
+  const step = now => {
+    const dt = Math.min(now - last, 40); last = now;
+    acc.sx += vx * dt; acc.sy += vy * dt; flush();
+    const f = Math.pow(0.996, dt);  // ~ -22% per 60 ms
+    vx *= f; vy *= f;
+    glide = Math.hypot(vx, vy) > 0.03 ? { id: requestAnimationFrame(step) } : null;
+  };
+  glide = { id: requestAnimationFrame(step) };
+}
+
+surface.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  stopGlide();
+  hint.style.opacity = 0;
+  surface.setPointerCapture(e.pointerId);
+  pts.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp });
+  if (pts.size === 1) g = { t0: e.timeStamp, max: 1, moved: 0, live: false, pend: { mx: 0, my: 0, sx: 0, sy: 0 }, vx: 0, vy: 0, lastMove: e.timeStamp };
+  else g.max = Math.max(g.max, pts.size);
+});
+surface.addEventListener('pointermove', e => {
+  const p = pts.get(e.pointerId);
+  if (!p || !g) return;
+  const dx = e.clientX - p.x, dy = e.clientY - p.y, dt = Math.max(1, e.timeStamp - p.t);
+  p.x = e.clientX; p.y = e.clientY; p.t = e.timeStamp;
+  if (!dx && !dy) return;
+  g.moved += Math.hypot(dx, dy);
+  g.lastMove = e.timeStamp;
+  // Until the finger clearly moves (or stays down past tap time) hold the motion back,
+  // so taps don't nudge the pointer and break double-clicks.
+  const target = g.live ? acc : g.pend;
+  if (g.max === 1) {
+    const k = gain(Math.hypot(dx, dy) / dt);
+    target.mx += dx * k; target.my += dy * k;
+  } else if (pts.size === 2) {
+    target.sx += dx / 2; target.sy += dy / 2;  // each finger contributes half: the average motion
+    g.vx = 0.7 * g.vx + 0.3 * dx / dt; g.vy = 0.7 * g.vy + 0.3 * dy / dt;
+  }
+  if (!g.live && (g.moved > SLOP * g.max || e.timeStamp - g.t0 > TAP_MS)) {
+    g.live = true;
+    for (const k in acc) acc[k] += g.pend[k];
+  }
+  if (g.live) schedule();
+});
+function surfaceEnd(e) {
+  if (!pts.delete(e.pointerId) || !g || pts.size) return;
+  const tap = !g.live && e.type === 'pointerup' && e.timeStamp - g.t0 < TAP_MS + 100 * (g.max - 1);
+  if (tap && S.tapClick) {
+    send({ t: 'c', b: g.max === 1 ? 'l' : g.max === 2 ? 'r' : 'm', mods: takeMods() });
+    buzz(12);
+  } else if (g.max === 2 && g.live && e.timeStamp - g.lastMove < 80) {
+    startGlide(g.vx, g.vy);
+  }
+  g = null;
+}
+surface.addEventListener('pointerup', surfaceEnd);
+surface.addEventListener('pointercancel', surfaceEnd);
+
+// Right-edge strip: one-finger scrolling.
+let sp = null;
+strip.addEventListener('pointerdown', e => {
+  e.preventDefault(); stopGlide();
+  strip.setPointerCapture(e.pointerId);
+  sp = { id: e.pointerId, y: e.clientY, t: e.timeStamp, v: 0 };
+});
+strip.addEventListener('pointermove', e => {
+  if (!sp || e.pointerId !== sp.id) return;
+  const dy = e.clientY - sp.y, dt = Math.max(1, e.timeStamp - sp.t);
+  sp.y = e.clientY; sp.t = e.timeStamp;
+  sp.v = 0.7 * sp.v + 0.3 * dy / dt;
+  acc.sy += dy; schedule();
+});
+const stripEnd = e => {
+  if (!sp || e.pointerId !== sp.id) return;
+  if (e.type === 'pointerup' && e.timeStamp - sp.t < 80) startGlide(0, sp.v);
+  sp = null;
+};
+strip.addEventListener('pointerup', stripEnd);
+strip.addEventListener('pointercancel', stripEnd);
+
+// ---------------------------------------------------------------- typing
+// Phone keyboards (autocorrect, swipe, IME composition) don't send reliable key events, so diff the
+// text box instead: whatever changed since last time becomes backspaces + typed text on the PC.
+const ta = $('#text');
+let prev = '', composing = false;
+function clearText() { ta.value = ''; prev = ''; }
+ta.addEventListener('compositionstart', () => { composing = true; });
+ta.addEventListener('compositionend', () => { composing = false; });
+ta.addEventListener('input', () => {
+  const a = Array.from(prev), b = Array.from(ta.value);
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  const del = a.length - i, ins = b.slice(i).join('');
+  prev = ta.value;
+  // A pure delete takes any one-shot modifier (Ctrl+Backspace); a replacement leaves it for the new text.
+  if (del && !ins) pressKey('back', [], del);
+  else if (del) send({ t: 'k', k: 'back', n: del });
+  typeText(ins);
+  if (ins.includes('\n') || (!composing && prev.length > 200)) clearText();
+  ta.scrollLeft = ta.scrollWidth;
+});
+// Edits only make sense at the end of the line, which is where the PC's cursor is.
+const caretToEnd = () => { const n = ta.value.length; ta.setSelectionRange(n, n); };
+ta.addEventListener('select', caretToEnd);
+ta.addEventListener('click', caretToEnd);
+ta.addEventListener('keydown', e => {
+  // Nothing left in the box to delete: pass the backspace straight through.
+  if (e.key === 'Backspace' && !ta.value) { e.preventDefault(); pressKey('back'); }
+});
+ta.addEventListener('focus', () => { document.body.classList.add('typing'); setTimeout(caretToEnd); });
+ta.addEventListener('blur', () => { document.body.classList.remove('typing'); });
+
+let kbWasOpen = false;
+const kbBtn = $('#btn-kb');
+kbBtn.addEventListener('pointerdown', () => { kbWasOpen = document.activeElement === ta; });
+kbBtn.addEventListener('click', () => { if (kbWasOpen) ta.blur(); else ta.focus(); });
+
+// ---------------------------------------------------------------- layout
+// Size the app to the visible area so the phone keyboard pushes the controls up instead of covering them.
+function fit() {
+  const vv = window.visualViewport;
+  app.style.height = (vv ? vv.height : innerHeight) + 'px';
+  app.style.transform = vv && vv.offsetTop ? `translateY(${vv.offsetTop}px)` : '';
+}
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', fit);
+  visualViewport.addEventListener('scroll', fit);
+}
+window.addEventListener('resize', fit);
+fit();
+
+const fsBtn = $('#btn-fs');
+if (document.fullscreenEnabled) {
+  fsBtn.hidden = false;
+  fsBtn.addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  });
+}
+
+connect();
+</script>
+</body>
+</html>
